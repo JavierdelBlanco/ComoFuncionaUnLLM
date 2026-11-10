@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cómo funciona un LLM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;800&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --paper:#EEF0F8;
+  --surface:#FFFFFF;
+  --border:#CDD1E8;
+  --ink:#20204A;
+  --ink-soft:#55557F;
+  --accent:#5B3FF0;
+  --on-accent:#FFFFFF;
+  --bar-bg:#E3E5F4;
+  --t1:#D9D2FF; --t2:#BFEFDD; --t3:#FFE1A0; --t4:#FFCFDD; --t5:#BFE2FF;
+  --on-tile:#20204A;
+  --tile-edge:rgba(32,32,74,.28);
+  --focus:#5B3FF0;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --paper:#14142B;
+    --surface:#1E1E3F;
+    --border:#3A3A6C;
+    --ink:#ECECFF;
+    --ink-soft:#B0B0D8;
+    --accent:#A99BFF;
+    --on-accent:#14142B;
+    --bar-bg:#2C2C57;
+    --t1:#4A3FA3; --t2:#1F6A55; --t3:#7A5B12; --t4:#8A3050; --t5:#20598A;
+    --on-tile:#F2F2FF;
+    --tile-edge:rgba(0,0,0,.45);
+    --focus:#FFE08A;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --paper:#14142B;
+  --surface:#1E1E3F;
+  --border:#3A3A6C;
+  --ink:#ECECFF;
+  --ink-soft:#B0B0D8;
+  --accent:#A99BFF;
+  --on-accent:#14142B;
+  --bar-bg:#2C2C57;
+  --t1:#4A3FA3; --t2:#1F6A55; --t3:#7A5B12; --t4:#8A3050; --t5:#20598A;
+  --on-tile:#F2F2FF;
+  --tile-edge:rgba(0,0,0,.45);
+  --focus:#FFE08A;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:1.05rem;
+  line-height:1.55;
+}
+.wrap{max-width:900px;margin:0 auto;padding:32px 16px 64px}
+h1,h2{font-family:"Unbounded","Arial Black",system-ui,sans-serif;letter-spacing:-.02em}
+h1{font-size:clamp(1.9rem,6.4vw,3.4rem);font-weight:800;line-height:1.08;margin:0 0 16px}
+h2{font-size:clamp(1.25rem,3.6vw,1.65rem);font-weight:800;line-height:1.2;margin:0 0 10px}
+h3{font-size:1.1rem;margin:0 0 4px}
+.lead{max-width:60ch;margin:0;color:var(--ink-soft);font-size:1.15rem}
+section{margin-top:60px}
+section>p{max-width:62ch;margin:0 0 16px}
+.muted{color:var(--ink-soft)}
+button,input,textarea{font:inherit;color:inherit}
+button{touch-action:manipulation}
+button:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+
+.panel{
+  background:var(--surface);
+  border:1.5px solid var(--border);
+  border-radius:16px;
+  padding:18px;
+}
+.row{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.row+.row{margin-top:12px}
+.lbl{font-weight:700;font-size:.95rem}
+.field{
+  width:100%;
+  padding:10px 12px;
+  background:var(--paper);
+  border:1.5px solid var(--border);
+  border-radius:10px;
+}
+textarea.field{resize:vertical;line-height:1.5}
+.seg{display:inline-flex;flex-wrap:wrap;border:1.5px solid var(--ink);border-radius:10px;overflow:hidden}
+.seg button{border:0;background:transparent;padding:7px 12px;font-weight:700;cursor:pointer}
+.seg button+button{border-left:1.5px solid var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.seg button:focus-visible{outline-offset:-3px}
+.btn{
+  border:1.5px solid var(--ink);background:var(--surface);color:var(--ink);
+  padding:9px 15px;border-radius:10px;font-weight:700;cursor:pointer;
+}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+
+/* fichas */
+.tile{
+  display:inline-flex;align-items:center;
+  padding:5px 10px;border-radius:8px;
+  font-weight:700;line-height:1.25;white-space:pre;
+  background:var(--t1);color:var(--on-tile);
+  box-shadow:0 3px 0 var(--tile-edge);
+}
+.tile[data-c="1"]{background:var(--t2)}
+.tile[data-c="2"]{background:var(--t3)}
+.tile[data-c="3"]{background:var(--t4)}
+.tile[data-c="4"]{background:var(--t5)}
+
+.tokens{display:flex;flex-wrap:wrap;gap:10px 6px;min-height:48px;margin-top:14px;padding-bottom:3px}
+.tcount{font-weight:700;color:var(--ink-soft)}
+
+.outbox{
+  margin:14px 0 0;min-height:3.6rem;
+  padding:8px 0 8px 14px;
+  border-left:4px solid var(--accent);
+  font-size:1.25rem;line-height:1.75;
+}
+.outbox .new{background:var(--t3);color:var(--on-tile);border-radius:6px;padding:1px 6px;box-shadow:0 2px 0 var(--tile-edge)}
+.outbox .empty{color:var(--ink-soft);font-size:1rem}
+.cand-title{margin-top:18px}
+.cands{display:flex;flex-direction:column;gap:2px;margin-top:6px}
+.cand{
+  display:grid;grid-template-columns:minmax(96px,170px) 1fr 50px;align-items:center;gap:12px;
+  width:100%;padding:6px 8px;border:1.5px solid transparent;border-radius:10px;
+  background:transparent;text-align:left;cursor:pointer;
+}
+.cand:hover{border-color:var(--border);background:var(--paper)}
+.bar{height:14px;border-radius:7px;background:var(--bar-bg);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:7px;transition:width .25s}
+.pct{font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+.note{margin:10px 0 0;color:var(--ink-soft);font-size:.95rem}
+.sugg{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.sugg button{border:0;padding:0;background:none;cursor:pointer}
+.slider{width:100%;max-width:340px;accent-color:var(--accent)}
+.slider-wrap{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+details.train{margin-bottom:16px;border-bottom:1.5px solid var(--border);padding-bottom:16px}
+details.train summary{font-weight:700;cursor:pointer;margin-bottom:10px}
+.stat{margin:8px 0 0;color:var(--ink-soft);font-size:.95rem}
+
+.compare{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0;border:1.5px solid var(--border);border-radius:16px;overflow:hidden;background:var(--surface)}
+.compare>div{padding:12px 16px;border-top:1.5px solid var(--border)}
+.compare>div:nth-child(-n+2){border-top:0;font-weight:800;background:var(--t1);color:var(--on-tile)}
+.compare>div:nth-child(2){background:var(--t2)}
+.compare>div:nth-child(odd){border-right:1.5px solid var(--border)}
+.compare small{display:block;color:var(--ink-soft);font-size:.82rem;font-weight:700;margin-bottom:2px}
+@media (max-width:560px){
+  .compare{grid-template-columns:minmax(0,1fr)}
+  .compare>div:nth-child(odd){border-right:0}
+  .compare>div:nth-child(2){border-top:1.5px solid var(--border)}
+}
+.points{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:14px;max-width:64ch}
+.points li{padding-left:16px;border-left:4px solid var(--accent)}
+.points b{display:block}
+.talk{margin:0;padding-left:1.2rem;display:flex;flex-direction:column;gap:8px;max-width:62ch}
+.foot{margin-top:48px;color:var(--ink-soft);font-size:.92rem;max-width:64ch}
+
+@media (max-width:560px){
+  .cand{grid-template-columns:minmax(84px,120px) 1fr 44px;gap:8px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Cómo funciona un LLM</h1>
+    <p class="lead">Un modelo de lenguaje grande (LLM) hace una sola cosa: mira un texto y calcula qué fragmento es probable que venga después. Repetido muchas veces, termina escribiendo respuestas enteras. Acá podés armar una versión de juguete y verlo por dentro.</p>
+  </header>
+
+  <section>
+    <h2>Primero, el texto se parte en fragmentos</h2>
+    <p>Un LLM no lee letras ni palabras enteras: trabaja con fragmentos llamados <i>tokens</i>, y cada uno es un número. Escribí una frase y mirá cómo se parte.</p>
+    <div class="panel">
+      <label class="lbl" for="txt">Escribí una frase</label>
+      <input id="txt" class="field" type="text" value="Los modelos de lenguaje convierten palabras en números" autocomplete="off" spellcheck="false">
+      <div class="row">
+        <div class="seg" role="group" aria-label="Qué mostrar en las fichas" id="seg-view">
+          <button type="button" data-view="texto" aria-pressed="true">Ver fragmentos</button>
+          <button type="button" data-view="numeros" aria-pressed="false">Ver números</button>
+        </div>
+        <span class="tcount" id="tcount"></span>
+      </div>
+      <div class="tokens" id="tokens" aria-live="polite"></div>
+      <p class="note">Los cortes y los números son ilustrativos: cada modelo real usa su propio método y su propia tabla.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Después, predice qué fragmento sigue</h2>
+    <p>Este modelo de juguete aprendió contando qué palabra suele venir después de cada otra en un texto. Elegí la siguiente palabra vos, o dejá que elija el modelo según las probabilidades.</p>
+    <div class="panel">
+      <details class="train" open>
+        <summary>Texto con el que aprendió este modelo</summary>
+        <div class="row">
+          <span class="lbl" id="lbl-corp">Elegí un texto</span>
+          <div class="seg" role="group" aria-labelledby="lbl-corp" id="seg-corp">
+            <button type="button" data-corp="escuela" aria-pressed="true">Vida escolar</button>
+            <button type="button" data-corp="futbol" aria-pressed="false">Fútbol</button>
+            <button type="button" data-corp="recetas" aria-pressed="false">Recetas</button>
+            <button type="button" data-corp="propio" aria-pressed="false">Escribir el mío</button>
+          </div>
+        </div>
+        <div class="row">
+          <textarea id="corpus" class="field" rows="6" aria-label="Texto de aprendizaje del modelo" placeholder="Escribí o pegá varias frases cortas. El modelo aprende de lo que pongas acá."></textarea>
+        </div>
+        <p class="stat" id="stat"></p>
+      </details>
+
+      <div class="row">
+        <label class="lbl" for="prompt">Empezá la frase</label>
+        <input id="prompt" class="field" style="max-width:280px" type="text" value="la profe" autocomplete="off" spellcheck="false">
+        <button type="button" class="btn" id="btn-restart">Empezar de nuevo</button>
+      </div>
+
+      <p class="outbox" id="outbox" aria-live="polite"></p>
+
+      <h3 class="cand-title" id="cand-title"></h3>
+      <div class="cands" id="cands"></div>
+      <div class="sugg" id="sugg"></div>
+      <p class="note" id="ctxline"></p>
+
+      <div class="row" style="margin-top:18px">
+        <span class="lbl" id="lbl-ctx">Cuánto mira hacia atrás</span>
+        <div class="seg" role="group" aria-labelledby="lbl-ctx" id="seg-ctx">
+          <button type="button" data-ctx="1" aria-pressed="true">1 palabra</button>
+          <button type="button" data-ctx="2" aria-pressed="false">2 palabras</button>
+        </div>
+      </div>
+      <div class="row">
+        <label class="lbl" for="temp">Temperatura</label>
+        <div class="slider-wrap">
+          <span class="muted">Prudente</span>
+          <input id="temp" class="slider" type="range" min="0.1" max="2" step="0.1" value="1">
+          <span class="muted">Creativa</span>
+        </div>
+      </div>
+      <p class="note" id="tempnote"></p>
+
+      <div class="row" style="margin-top:14px">
+        <button type="button" class="btn primary" id="btn-pick">Que elija el modelo</button>
+        <button type="button" class="btn" id="btn-auto">Escribir una oración</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>El juguete y el LLM de verdad</h2>
+    <p>La idea central es la misma: probabilidades sobre el próximo fragmento. Lo que cambia es la escala y la forma de relacionar las palabras.</p>
+    <div class="compare">
+      <div>Este modelo de juguete</div>
+      <div>Un LLM real</div>
+      <div><small>Lo que lee</small>Las frases que están en el cuadro de texto.</div>
+      <div><small>Lo que lee</small>Enormes cantidades de texto: libros, páginas web, código.</div>
+      <div><small>Cuánto contexto mira</small>Una o dos palabras.</div>
+      <div><small>Cuánto contexto mira</small>Miles de fragmentos a la vez, y decide a cuáles prestarles más atención.</div>
+      <div><small>Cómo guarda lo aprendido</small>Una tabla de conteos.</div>
+      <div><small>Cómo guarda lo aprendido</small>Una red neuronal con miles de millones de parámetros, ajustados durante el entrenamiento.</div>
+      <div><small>Cómo elige</small>Probabilidades y azar, controlados por la temperatura.</div>
+      <div><small>Cómo elige</small>Igual: probabilidades y azar, controlados por la temperatura.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Qué cambia en el aula</h2>
+    <ul class="points">
+      <li><b>Suena bien no es lo mismo que es verdad.</b>El modelo elige fragmentos probables; no verifica si lo que dice es cierto. Por eso puede equivocarse con total seguridad.</li>
+      <li><b>Depende de lo que leyó.</b>Cambiá el texto de aprendizaje de arriba y mirá cómo cambia lo que “sabe” y lo que dice. Con los LLM reales pasa lo mismo, a gran escala: los vacíos y sesgos de los textos se notan en las respuestas.</li>
+      <li><b>No siempre responde igual.</b>Hay azar en la elección. Con la misma pregunta pueden salir respuestas distintas.</li>
+      <li><b>Un agente suma herramientas y un ciclo.</b>El LLM propone qué hacer, y las herramientas (buscar, escribir un archivo, enviar un mensaje) lo ejecutan. Después el agente vuelve a mirar el resultado.</li>
+    </ul>
+  </section>
+
+  <p class="foot">Versión simplificada para entender la idea. Los asistentes actuales, además, se ajustan después con instrucciones y con opiniones de personas, y pueden usar herramientas externas.</p>
+</div>
+
+<script>
+(function(){
+  /* ---------- 1. fragmentos ---------- */
+  var txtEl = document.getElementById('txt');
+  var tokensEl = document.getElementById('tokens');
+  var tcountEl = document.getElementById('tcount');
+  var view = 'texto';
+
+  function syll(w){
+    var m = w.match(/[^aeiouáéíóúü]*[aeiouáéíóúü]+(?:[^aeiouáéíóúü]+(?![aeiouáéíóúü]))?/gi);
+    if (!m || m.join('') !== w) return [w];
+    return m;
+  }
+  function toyTokens(str){
+    var parts = str.match(/[\p{L}\p{N}]+|[^\s\p{L}\p{N}]/gu) || [];
+    var out = [];
+    parts.forEach(function(p){
+      if (p.length <= 7 || !/^\p{L}+$/u.test(p)){ out.push(p); return; }
+      var s = syll(p), cur = '';
+      s.forEach(function(x, i){
+        cur += x;
+        if ((i % 2 === 1) || i === s.length - 1){ out.push(cur); cur = ''; }
+      });
+    });
+    return out;
+  }
+  function hashId(t){
+    var h = 2166136261;
+    for (var i = 0; i < t.length; i++){ h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0) % 48000 + 1000;
+  }
+  function renderTokens(){
+    var toks = toyTokens(txtEl.value);
+    tokensEl.innerHTML = '';
+    toks.forEach(function(t, i){
+      var s = document.createElement('span');
+      s.className = 'tile';
+      s.dataset.c = i % 5;
+      s.textContent = view === 'texto' ? t : String(hashId(t));
+      tokensEl.appendChild(s);
+    });
+    tcountEl.textContent = toks.length === 0 ? '' : (toks.length === 1 ? '1 fragmento' : toks.length + ' fragmentos');
+  }
+  txtEl.addEventListener('input', renderTokens);
+  document.querySelectorAll('#seg-view button').forEach(function(b){
+    b.addEventListener('click', function(){
+      view = b.dataset.view;
+      document.querySelectorAll('#seg-view button').forEach(function(o){
+        o.setAttribute('aria-pressed', o === b ? 'true' : 'false');
+      });
+      renderTokens();
+    });
+  });
+
+  /* ---------- 2. modelo de juguete ---------- */
+  var CORPORA = {
+    escuela:{prompt:'la profe', text:
+      'La profe entró al aula y saludó a todos.\n' +
+      'La profe explicó la clase con un ejemplo.\n' +
+      'El profe entró al aula con una carpeta.\n' +
+      'Los chicos entraron al aula y se sentaron.\n' +
+      'La clase empezó con un ejemplo sencillo.\n' +
+      'Los chicos hicieron preguntas sobre el ejemplo.\n' +
+      'La profe escribió el tema en el pizarrón.\n' +
+      'El profe escribió una pregunta en el pizarrón.\n' +
+      'Los chicos copiaron el tema en la carpeta.\n' +
+      'La profe contestó las preguntas de todos.\n' +
+      'Después del recreo la clase siguió con otro tema.\n' +
+      'Los chicos trabajaron en grupo con la carpeta.\n' +
+      'El timbre sonó y los chicos salieron al recreo.\n' +
+      'La profe guardó la carpeta y salió del aula.\n' +
+      'El profe saludó a los chicos y empezó la clase.\n' +
+      'Los chicos escucharon el ejemplo y levantaron la mano.'},
+    futbol:{prompt:'el delantero', text:
+      'El equipo salió a la cancha con mucha energía.\n' +
+      'El equipo ganó el partido con un gol de cabeza.\n' +
+      'El delantero pateó al arco y el arquero atajó la pelota.\n' +
+      'El arquero atajó el penal y la gente gritó.\n' +
+      'La gente cantó durante todo el partido.\n' +
+      'El delantero metió un gol en el último minuto.\n' +
+      'El técnico cambió al delantero en el segundo tiempo.\n' +
+      'El técnico habló con el equipo antes del partido.\n' +
+      'La pelota pegó en el palo y salió afuera.\n' +
+      'El equipo perdió el partido por un gol.\n' +
+      'La gente aplaudió al equipo al final del partido.\n' +
+      'El árbitro cobró un penal en el segundo tiempo.\n' +
+      'El arquero atajó la pelota con las dos manos.\n' +
+      'El delantero festejó el gol con la gente.'},
+    recetas:{prompt:'primero se', text:
+      'Primero se pone el agua en la olla y se espera.\n' +
+      'Después se agrega la sal y se revuelve con la cuchara.\n' +
+      'Después se agrega el arroz y se espera diez minutos.\n' +
+      'Primero se corta la cebolla y se pone en la sartén.\n' +
+      'Después se agrega el tomate y se revuelve con la cuchara.\n' +
+      'Se revuelve con la cuchara hasta que está listo.\n' +
+      'Se pone la sal y se prueba la salsa.\n' +
+      'Primero se lava el tomate y se corta en trozos.\n' +
+      'Se espera diez minutos y se apaga el fuego.\n' +
+      'Después se prueba la salsa y se agrega la sal.'},
+    propio:{prompt:'', text:''}
+  };
+
+  var corpusEl = document.getElementById('corpus');
+  var statEl = document.getElementById('stat');
+  var promptEl = document.getElementById('prompt');
+  var outEl = document.getElementById('outbox');
+  var titleEl = document.getElementById('cand-title');
+  var candsEl = document.getElementById('cands');
+  var suggEl = document.getElementById('sugg');
+  var ctxEl = document.getElementById('ctxline');
+  var tempEl = document.getElementById('temp');
+  var tempNote = document.getElementById('tempnote');
+  var btnPick = document.getElementById('btn-pick');
+  var btnAuto = document.getElementById('btn-auto');
+
+  var c1 = new Map(), c2 = new Map(), vocab = new Set(), nTokens = 0, nPairs = 0;
+  var out = [], order = 1, temp = 1, auto = false, autoId = 0, current = null;
+
+  function tok(s){ return (s.toLowerCase().match(/[\p{L}\p{N}]+|[.,;!?¿¡]/gu) || []); }
+  function bump(map, k, w){
+    if (!map.has(k)) map.set(k, new Map());
+    var m = map.get(k);
+    m.set(w, (m.get(w) || 0) + 1);
+  }
+  function train(){
+    var t = tok(corpusEl.value);
+    c1 = new Map(); c2 = new Map(); vocab = new Set(t); nTokens = t.length;
+    for (var i = 0; i < t.length - 1; i++){
+      bump(c1, t[i], t[i+1]);
+      if (i + 2 < t.length) bump(c2, t[i] + ' ' + t[i+1], t[i+2]);
+    }
+    nPairs = 0;
+    c1.forEach(function(m){ nPairs += m.size; });
+    statEl.textContent = nTokens < 3
+      ? 'Todavía no hay texto para aprender.'
+      : 'Leyó ' + nTokens + ' palabras y signos (' + vocab.size + ' distintos) y aprendió ' + nPairs + ' combinaciones de dos palabras.';
+  }
+
+  function candidates(){
+    if (!out.length) return null;
+    var last = out[out.length - 1], prev = out[out.length - 2], map = null, used = null, fell = false;
+    if (order === 2 && prev !== undefined){
+      var k2 = prev + ' ' + last;
+      if (c2.has(k2)){ map = c2.get(k2); used = [prev, last]; }
+      else fell = true;
+    }
+    if (!map && c1.has(last)){ map = c1.get(last); used = [last]; }
+    else if (!map) return null;
+    var arr = [];
+    map.forEach(function(c, w){ arr.push({w:w, c:c}); });
+    arr.sort(function(a,b){ return b.c - a.c || (a.w < b.w ? -1 : 1); });
+    var sum = 0;
+    arr.forEach(function(x){ x.wt = Math.pow(x.c, 1 / temp); sum += x.wt; });
+    arr.forEach(function(x){ x.p = x.wt / sum; });
+    return {list:arr, used:used, fell:fell && order === 2};
+  }
+  function sample(list){
+    var r = Math.random(), acc = 0;
+    for (var i = 0; i < list.length; i++){
+      acc += list[i].p;
+      if (r <= acc) return list[i].w;
+    }
+    return list[list.length - 1].w;
+  }
+
+  function capital(w){ return w.charAt(0).toUpperCase() + w.slice(1); }
+  function renderOut(){
+    outEl.innerHTML = '';
+    if (!out.length){
+      var e = document.createElement('span');
+      e.className = 'empty';
+      e.textContent = 'Escribí el comienzo de una frase arriba.';
+      outEl.appendChild(e);
+      return;
+    }
+    var newest = out.length - 1;
+    var capNext = true, noSpace = true;
+    out.forEach(function(w, i){
+      var isPunct = /^[.,;!?]$/.test(w);
+      var shown = capNext && !isPunct ? capital(w) : w;
+      if (!isPunct && !noSpace) outEl.appendChild(document.createTextNode(' '));
+      var s = document.createElement('span');
+      s.textContent = shown;
+      if (i === newest && auto !== null && out.length > promptLen) s.className = 'new';
+      outEl.appendChild(s);
+      capNext = (w === '.' || w === '!' || w === '?');
+      noSpace = (w === '¿' || w === '¡');
+    });
+  }
+
+  var promptLen = 0;
+  function resetFromPrompt(){
+    stopAuto();
+    out = tok(promptEl.value);
+    promptLen = out.length;
+    renderOut();
+    renderCands();
+  }
+
+  function pct(p){ return p < 0.01 ? '<1%' : Math.round(p * 100) + '%'; }
+  function renderCands(){
+    candsEl.innerHTML = ''; suggEl.innerHTML = ''; ctxEl.textContent = '';
+    current = null;
+    btnPick.disabled = true; btnAuto.disabled = true;
+    if (nTokens < 3){
+      titleEl.textContent = 'Falta texto para aprender';
+      ctxEl.textContent = 'Escribí varias frases en el cuadro de texto de arriba para que el modelo tenga de dónde aprender.';
+      return;
+    }
+    if (!out.length){
+      titleEl.textContent = '¿Con qué palabra empezamos?';
+      ctxEl.textContent = 'Escribí el comienzo de una frase en “Empezá la frase”.';
+      return;
+    }
+    var last = out[out.length - 1];
+    var cand = candidates();
+    if (!cand){
+      titleEl.textContent = 'Después de “' + last + '”, el modelo no sabe qué sigue';
+      ctxEl.textContent = vocab.has(last)
+        ? 'En su texto, esa palabra nunca aparece seguida de otra.'
+        : 'El modelo nunca vio esa palabra. Un LLM real vio tanto texto que le pasa mucho menos, pero igual puede fallar con lo muy raro o lo muy nuevo.';
+      var words = Array.from(vocab).filter(function(w){ return /^\p{L}+$/u.test(w) && c1.has(w); });
+      words.sort(function(){ return Math.random() - .5; });
+      words.slice(0, 5).forEach(function(w, i){
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.setAttribute('aria-label', 'Probar con ' + w);
+        var s = document.createElement('span');
+        s.className = 'tile'; s.dataset.c = i % 5; s.textContent = w;
+        b.appendChild(s);
+        b.addEventListener('click', function(){ promptEl.value = w; resetFromPrompt(); });
+        suggEl.appendChild(b);
+      });
+      return;
+    }
+    current = cand;
+    btnPick.disabled = false; btnAuto.disabled = false;
+    titleEl.textContent = '¿Qué viene después de “' + cand.used.join(' ') + '”?';
+    var top = cand.list.slice(0, 8);
+    top.forEach(function(x, i){
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cand';
+      b.setAttribute('aria-label', 'Elegir “' + x.w + '”, ' + pct(x.p));
+      var t = document.createElement('span');
+      t.className = 'tile'; t.dataset.c = i % 5; t.textContent = x.w;
+      var bar = document.createElement('span');
+      bar.className = 'bar';
+      var fill = document.createElement('i');
+      fill.style.width = (x.p * 100).toFixed(1) + '%';
+      bar.appendChild(fill);
+      var p = document.createElement('span');
+      p.className = 'pct'; p.textContent = pct(x.p);
+      b.appendChild(t); b.appendChild(bar); b.appendChild(p);
+      b.addEventListener('click', function(){ stopAuto(); push(x.w); });
+      candsEl.appendChild(b);
+    });
+    var more = cand.list.length - top.length;
+    var line = 'Para decidir miró ' + (cand.used.length === 1 ? '1 palabra' : '2 palabras') + ': “' + cand.used.join(' ') + '”.';
+    if (cand.fell) line += ' No encontró esa pareja en su texto, así que miró solo la última palabra.';
+    if (more > 0) line += ' Hay ' + more + (more === 1 ? ' opción más' : ' opciones más') + ' con poca probabilidad.';
+    ctxEl.textContent = line;
+  }
+
+  function push(w){
+    out.push(w);
+    renderOut();
+    renderCands();
+  }
+
+  function tempText(){
+    if (temp <= 0.4) return 'Casi siempre elige la opción más probable, así que los textos se repiten.';
+    if (temp <= 1.2) return 'Elige con azar, pero favoreciendo las opciones más probables.';
+    return 'Les da mucha chance a las opciones raras: sale más variado y también más disparatado.';
+  }
+
+  function wait(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+  function stopAuto(){
+    auto = false; autoId++;
+    btnAuto.textContent = 'Escribir una oración';
+  }
+  async function runAuto(){
+    if (auto){ stopAuto(); return; }
+    auto = true; var my = ++autoId;
+    btnAuto.textContent = 'Detener';
+    var n = 0;
+    while (auto && my === autoId && n < 30){
+      if (!current) break;
+      var w = sample(current.list);
+      push(w);
+      n++;
+      if (w === '.' || w === '!' || w === '?') break;
+      await wait(420);
+    }
+    if (my === autoId) stopAuto();
+  }
+
+  /* eventos */
+  tempEl.addEventListener('input', function(){
+    temp = +tempEl.value;
+    tempNote.textContent = tempText();
+    renderCands();
+  });
+  promptEl.addEventListener('input', resetFromPrompt);
+  document.getElementById('btn-restart').addEventListener('click', resetFromPrompt);
+  btnPick.addEventListener('click', function(){
+    stopAuto();
+    if (current) push(sample(current.list));
+  });
+  btnAuto.addEventListener('click', runAuto);
+  corpusEl.addEventListener('input', function(){
+    markCorp('propio-edit');
+    train();
+    stopAuto();
+    renderCands();
+  });
+  function markCorp(name){
+    document.querySelectorAll('#seg-corp button').forEach(function(b){
+      b.setAttribute('aria-pressed', b.dataset.corp === name ? 'true' : 'false');
+    });
+  }
+  document.querySelectorAll('#seg-corp button').forEach(function(b){
+    b.addEventListener('click', function(){
+      var c = CORPORA[b.dataset.corp];
+      markCorp(b.dataset.corp);
+      corpusEl.value = c.text;
+      promptEl.value = c.prompt;
+      train();
+      resetFromPrompt();
+      if (b.dataset.corp === 'propio') corpusEl.focus();
+    });
+  });
+  document.querySelectorAll('#seg-ctx button').forEach(function(b){
+    b.addEventListener('click', function(){
+      order = +b.dataset.ctx;
+      document.querySelectorAll('#seg-ctx button').forEach(function(o){
+        o.setAttribute('aria-pressed', o === b ? 'true' : 'false');
+      });
+      renderCands();
+    });
+  });
+
+  /* inicio */
+  renderTokens();
+  corpusEl.value = CORPORA.escuela.text;
+  tempNote.textContent = tempText();
+  train();
+  resetFromPrompt();
+})();
+</script>
+</body>
+</html>
